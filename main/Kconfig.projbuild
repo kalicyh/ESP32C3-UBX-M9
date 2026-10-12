@@ -1,0 +1,17 @@
+menu "UBX-M9 reader"
+choice GNSS_TRANSPORT
+    prompt "GNSS transport (use one interface at a time)"
+    default GNSS_UART
+config GNSS_UART
+    bool "UART1: ESP TX GPIO2, RX GPIO1"
+config GNSS_I2C
+    bool "I2C DDC: SCL GPIO3, SDA GPIO4"
+endchoice
+config GNSS_BAUD
+    int "Initial GNSS baud rate (automatic fallback scan)"
+    default 38400
+    range 4800 921600
+config GNSS_RAWX
+    bool "Request RXM-RAWX and RXM-SFRBX (firmware dependent, high bandwidth)"
+    default n
+endmenu
