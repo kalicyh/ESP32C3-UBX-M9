@@ -2,3 +2,8 @@ build*/
 sdkconfig
 sdkconfig.old
 managed_components/
+/.vscode
+
+.playwright-cli/
+output/
+__pycache__/

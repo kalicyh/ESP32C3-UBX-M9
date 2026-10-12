@@ -12,6 +12,8 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "ubx.h"
+#include "gnss_web.h"
+#include "ble_link.h"
 
 static const char *TAG = "m9";
 static ubx_parser parser;
@@ -29,6 +31,7 @@ typedef struct { size_t len; uint8_t data[]; } packet;
 
 static void received(const uint8_t *f, size_t n, void *context) {
     (void)context;
+    gnss_web_receive(f, n);
     if (f[2] == 0x0a && f[3] == 4 && n >= 48) version_seen = true;
     if (f[2] == wanted_class && f[3] == wanted_id) response_seen = true;
     packet *p = malloc(sizeof(*p) + n);
@@ -189,6 +192,8 @@ static void transport_init(void) {
 #endif
 }
 void app_main(void) {
+    gnss_web_init();
+    ble_link_start();
     output_queue = xQueueCreate(12,sizeof(packet *));
     configASSERT(output_queue);
     parser.callback = received;
@@ -247,6 +252,7 @@ void app_main(void) {
         index = (index+1) % (sizeof(messages)/sizeof(messages[0]));
         pump(200);
         if (esp_timer_get_time() >= next_stats) {
+            gnss_web_stats(parser.bad_checksum, parser.oversized, atomic_load(&dropped), io_errors, uart_overflows);
             ESP_LOGI(TAG,"stats checksum=%"PRIu32" oversize=%"PRIu32" output_drop=%u io_errors=%u uart_overflow=%u",
                 parser.bad_checksum,parser.oversized,atomic_load(&dropped),io_errors,uart_overflows);
             next_stats = esp_timer_get_time()+10000000;

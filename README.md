@@ -2,6 +2,25 @@
 
 ESP-IDF C 工程。默认 UART1 连接 GNSS，UART0 以 **115200、8N1** 输出 JSON 行和诊断日志。已在 ESP-IDF 6.1 编译，并完成 ESP32-C3 实机刷写及 UART GNSS / USB 输出验证。仓库默认配置仍为 UART0 控制台，原生 USB 输出配置见下文。
 
+
+## 蓝牙网页仪表盘
+
+使用 ESP32-C3 BLE（NimBLE），不启动 Wi-Fi 热点。GNSS 串口输出继续保留。网页由电脑或 HTTPS 静态站点提供，数据通过浏览器直接连接 C3 蓝牙读取。
+
+1. 电脑启动网页：`python3 tools/serve_web.py`。
+2. 使用 Chrome / Edge 打开 `http://127.0.0.1:8765/`，点击 **连接蓝牙**，选择 `UBX-M9-BLE-xxxxxx`。
+3. 安卓使用支持 Web Bluetooth 的 Chrome，通过可信 HTTPS 打开相同网页文件，再点击连接。普通局域网 HTTP 地址不满足蓝牙安全上下文要求。网页文件位于 `main/web/`，可部署到静态 HTTPS 站点；本项目未替你发布公网网站。
+
+本地服务器支持 `--host`、`--port`、`--cert`、`--key`；使用证书时必须得到客户端信任。Safari / iOS 不支持此网页连接方式。系统蓝牙列表不一定显示 BLE 外设，应从网页连接按钮中选择。
+
+仪表盘包含有效定位状态、经纬度、高度、UTC、速度曲线、卫星天空图、信号强度表、局部轨迹、接收统计、原始帧及 JSON 下载。轨迹为相对首点的平面投影，不是道路地图。无效定位和过期数据不显示实时坐标。
+
+每次快照接收完成后约 1 秒请求下一份；原始数据页才请求原始帧。卫星最多 128 颗，原始帧保留最近 8 条、每条最多 512 字节并标记截断。BLE 是限量快照，完整实际接收 UBX 帧仍从串口取得，不保证 BLE 全量流记录。
+
+BLE 服务 UUID 为 `8c7b0001-6b8c-4a36-9f86-3ecfe03b6a91`；数据特征末段前缀 `8c7b0002`（Indicate），请求特征 `8c7b0003`（Write）。请求字节 1 为普通快照，2 包含原始帧。每包头 8 字节：版本、开始/结束标志、uint16 LE 序号、偏移、总长度；后接 UTF-8 JSON，最大 49152 字节。每包等待确认，网页验证分包顺序和完整性。
+
+一次允许一个客户端。当前未配置配对认证或强制加密，附近可连接的 BLE 客户端能读取定位数据。断线后重新广播，网页点击连接可恢复。
+
 ## 接线
 
 | 模块信号 | ESP32-C3 GPIO | 说明 |
@@ -88,3 +107,18 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I main main/ubx.
 实机验收：确认出现 VERSION，户外接天线后观察 fix_ok、经纬度、SAT；确认统计无持续增长的丢包/错误。2026-10-12 实机刷写校验通过，读取到 SPG 4.04 / PROTVER 32.01，以及 PVT、SAT、DOP、VERSION。约 18 秒采样期间，校验错误、超长帧、输出丢包、I/O 错误和 UART 溢出累计统计均为 0；部分 MON 消息轮询超时。当时 fix_ok=false、参与定位卫星数为 0，坐标和 UTC 不可用。尚未验证有效定位、I²C 实机通信及长期高流量稳定性。
 
 协议依据：[u-blox M9 SPG 4.04 Interface Description](https://content.u-blox.com/sites/default/files/u-blox-M9-SPG-4.04_InterfaceDescription_UBX-21022436.pdf)。串口输出选择参考 [ESP-IDF USB Serial/JTAG Console](https://docs.espressif.com/projects/esp-idf/en/v5.5/esp32c3/api-guides/usb-serial-jtag-console.html)。
+
+### 网页相关验证
+
+```sh
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/host -I main main/web_codec.c main/gnss_web.c main/ubx.c tests/test_web.c -o /tmp/esp32c3-test-web
+/tmp/esp32c3-test-web
+```
+
+测试覆盖 JSON 转义、容量边界、最大卫星数、原始帧截断。`tests/host` 为单线程主机测试，不代替 FreeRTOS 并发验证。
+
+```sh
+node tests/test_ble_transport.cjs
+```
+
+蓝牙分包测试覆盖 UTF-8 跨包、最小 MTU 分包、缺包、乱序、长度限制和结束标志。`tests/browser_checks.js` 用于 Playwright CLI，使用明确的合成 BLE 数据检查页面；不代表真实定位结果。真实无线连接、有效 GNSS 定位和长期运行需分别验收。
